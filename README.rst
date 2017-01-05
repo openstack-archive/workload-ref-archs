@@ -13,7 +13,7 @@ This repo will be used to maintain the documents of these reference
 architectures and sample code.
 
 * Free software: Apache license
-* Documentation: http://docs.openstack.org/developer/workload-ref-archs
-* Source: http://git.openstack.org/cgit/openstack/workload-ref-archs
 * Bugs: http://bugs.launchpad.net/workload-ref-archs
 
+.. * Documentation: http://docs.openstack.org/developer/workload-ref-archs
+.. * Source: http://git.openstack.org/cgit/openstack/workload-ref-archs
