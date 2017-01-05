@@ -1,0 +1,6 @@
+[run]
+branch = True
+source = workload-ref-archs
+
+[report]
+ignore_errors = True
