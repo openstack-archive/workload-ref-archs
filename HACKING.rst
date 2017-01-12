@@ -48,8 +48,8 @@ Submission Process
       :widths: 15 25
 
       * - <workload-name>.rst 
-        - Provides a full description of the workload. 
-          Refer sample.rst for example.
+        - Provides a full description of the workload.
+          Please follow the structure in `workload-template.rst <workload-ref-archs/workload-template.rst>`_
 
       * - figure
         - Include all images in this folder
