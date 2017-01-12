@@ -17,3 +17,6 @@ architectures and sample code.
 
 .. * Documentation: http://docs.openstack.org/developer/workload-ref-archs
 .. * Source: http://git.openstack.org/cgit/openstack/workload-ref-archs
+
+The `Hacking.rst <HACKING.rst>`_ file contains details on how to contribute
+workload reference architectures.
