@@ -1,11 +1,10 @@
-3-Tier LAMP Sample Heat Template
-================================
+Web Applications Reference Architecture Sample Heat Template
+============================================================
 
-These heat templates deploy WordPress on a 3-Tier LAMP architecture. There
-are two versions of the primary template, one which creates a static
-environment which does not require ceilometer, and one which provides
-autoscaling of the web and application tiers based on CPU load, which does
-require ceilometer.
+These heat templates deploy WordPress on a 3-Tier LAMP architecture. There are
+two versions of the primary template, one which creates a static environment
+which does not require ceilometer, and one which provides autoscaling of the
+web and application tiers based on CPU load, which does require ceilometer.
 
 
 **The WordPress 3-Tier LAMP Architecture Sample**
@@ -18,9 +17,8 @@ App     WordPress Server        Apache, PHP, MySQL Client, WordPress
 Data    Database Server         MySQL
 ======  ======================  =====================================
 
-**NOTE:**  The sample WordPress application was tested with CentOS7 and Ubuntu
-Trusty. The sample application installation does not currently work with Ubuntu
-Xenial
+**NOTE:**  The sample WordPress application was tested with CentOS7 and
+Ubuntu Trusty and Ubuntu Xenial.
 
 -----------------
 Heat File Details
@@ -28,12 +26,12 @@ Heat File Details
 
 The template uses a nested structure, with two different primary yaml files,
 both of which utilize the same 4 nested files.  The templates were tested using
-Mitaka release of OpenStack, and Ubuntu server 14.04 and Centos7.
+Newton release of OpenStack, and Ubuntu server 14.04 and Centos7.
 
 **WebAppStatic.yaml:** If you want a static environment, run this yaml file.
 This will create a static environment, with two load balanced web servers, and
 two load balanced application servers, and a single database server using
-cinder block storage for the database files.  
+cinder block storage for the database files.
 
 REQUIRED PARAMETERS:
 
@@ -44,8 +42,8 @@ OPTIONAL PARAMETERS:
   * db_instance_flavor, app_instance_flavor, web_instance_flavor,
     db_server_name, app_server_name, web_server_name, dns_nameserver
 
-**WebAppAutoScaling.yaml:**  If you want a dynamic autoscaling environment, run
-this yaml file.  This yaml files sets up heat autoscaling groups.  
+**WebAppAutoScaling.yaml:** If you want a dynamic autoscaling environment,
+run this yaml file.  This yaml files sets up heat autoscaling groups.
 
   REQUIRED PARAMETERS:
 
@@ -57,17 +55,17 @@ this yaml file.  This yaml files sets up heat autoscaling groups.
     db_server_name, app_server_name, web_server_name, dns_nameserver
 
 The following 4 yaml files are called by the primary files above, and are by
-default expected to be in a "nested" subdirectory:
+default expected to be in a nested subdirectory:
 
-**setup_net_sg.yaml:**  This file creates 3 separate private networks, one for
-each tier. In addition it creates two load balancers (using neutron LBaaS V1),
+**setup_net_sg.yaml:** This file creates 3 separate private networks, one for
+each tier.  In addition it creates two load balancers (using neutron LBaaS V2),
 one which has a public IP that connects the web private network to the public
 network, and one with a private IP that connects the web network to the
 application network. The template also creates a router connecting the
-application network to the database network.  In addition to the networks and
+application network to the database network. In addition to the networks and
 routers, the template creates 3 security groups, one for each of the tiers.
 
-**heat_web_tier.yaml:**  This template file launches the web tier nodes.
+**heat_web_tier.yaml:** This template file launches the web tier nodes.
 In addition to launching instances, it installs and configures Apache and
 Apache modproxy which is used to redirect traffic to the application nodes.
 
@@ -75,9 +73,9 @@ Apache modproxy which is used to redirect traffic to the application nodes.
 In addition to launching the instances, it installs Apache, PHP, MySQL client,
 and finally WordPress.
 
-**heat_sql_tier.yaml:**  This template file launches the database tier node and
+**heat_sql_tier.yaml:** This template file launches the database tier node and
 installs MySQL. In addition it creates a cinder block device to store the
-database files. The template also creates the required users and databases for
+database files.  The template also creates the required users and databases for
 the WordPress application.
 
 -------------------------------
@@ -93,4 +91,3 @@ credential file from Horizon under Project>Compute>Access & Security>API Access
 
 **Example to setup the autoscaling environment**::
   openstack stack create --template WebAppAutoScaling.yaml --parameter ssh_key_name=mykey --parameter image_id=centos --parameter dns_nameserver="8.8.8.8,8.8.4.4" --parameter public_network_id=external_network ThreeTierLAMP
-

@@ -1,21 +1,24 @@
-heat_template_version: 2013-05-23
+heat_template_version: 2016-10-14
 
 description: >
-  This is a nested Heat used by the 3-Tier Architecture Workload reference document
+  This is a nested Heat used by the Web Applications Workload Reference Architecture
   created by the Enterprise Working Group.  These templates demonstrate a sample
   LAMP architecture supporting Wordpress.  This template installs and configures
   Apache and Apache modproxy which is used to redirect traffic to the application nodes.
   This serves as a guide to new users and is not meant for production deployment.
 
   #Created by: Craig Sterrett 3/23/2016
-
+  #Updated by: Craig Sterrett 1/3/2017 to support LBaaS V2 and Newton
+  
 parameters:
   ssh_key_name:
     type: string
     label: SSH Key Name
     description: REQUIRED PARAMETER -Name of an existing SSH KeyPair to enable SSH access to instances.
-    hidden: false
     default: cloudkey
+    constraints:
+      - custom_constraint: nova.keypair
+        description: Must already exist on your cloud
 
   server_name:
     type: string
@@ -29,7 +32,9 @@ parameters:
     label: Instance Flavor
     description: The flavor type to use for each server.
     default: m1.small
-    hidden: false
+    constraints:
+      - custom_constraint: nova.flavor
+        description:  Must be a valid flavour provided by your cloud provider.
 
   image_id:
     type: string
@@ -37,12 +42,25 @@ parameters:
     description: >
       REQUIRED PARAMETER - The image id to be used for the compute instance. Please specify
       your own Image ID in your project/tenant.
-    hidden: false
+    constraints:
+      - custom_constraint: glance.image
+        description: Must be a valid image on your cloud
 
   private_network_id:
     type: string
     default: Web_Tier_private_network
     description: The private Web network that will be utilized for all web servers
+    constraints:
+      - custom_constraint: neutron.network
+        description: Must be a valid private network on your cloud
+
+  private_subnet_id:
+    type: string
+    description: Private subnet of the LBaaS Pool
+    default: private_subnet
+    constraints:
+      - custom_constraint: neutron.subnet
+        description: Must be a valid private subnet on your cloud
 
   security_group:
     type: string
@@ -52,6 +70,9 @@ parameters:
   pool_name:
     type: string
     description: LBaaS Pool to join
+    constraints:
+      - custom_constraint: neutron.lbaas.pool
+        description: Must be a LBaaS pool on your cloud
 
   app_lbaas_vip:
     type: string
@@ -90,8 +111,11 @@ resources:
              #Install Apache
              apt-get -y --force-yes install apache2
              apt-get install –y libapache2-mod-proxy-html libxml2-dev
+             apt-get install -y build-essential
              a2enmod proxy
              a2enmod proxy_http
+             a2enmod rewrite
+             a2enmod proxy_ajp
              a2enmod deflate
              a2enmod headers
              a2enmod proxy_connect
@@ -99,15 +123,16 @@ resources:
             cat > /etc/apache2/sites-enabled/000-default.conf << EOL
             <VirtualHost *:*>
                 ProxyPreserveHost On
-                ProxyPass / http://$app_lbaas_vip/
+                ProxyPass / http://$app_lbaas_vip/ Keepalive=On
                 ProxyPassReverse / http://$app_lbaas_vip/
                 ServerName localhost
             </VirtualHost>
             EOL
+             echo `hostname -I` `hostname` >> /etc/hosts
              /etc/init.d/apache2 restart
             elif which yum &> /dev/null
             then
-             #yum update -y
+             yum update -y
              #Install Apache
              yum install -y httpd
              yum install -y wget
@@ -123,11 +148,12 @@ resources:
             fi
 
   Pool_Member:
-      type: OS::Neutron::PoolMember
+      type: OS::Neutron::LBaaS::PoolMember
       properties:
-        pool_id: {get_param: pool_name}
+        pool: {get_param: pool_name}
         address: {get_attr: [web_server, first_address]}
         protocol_port: 80
+        subnet: {get_param: private_subnet_id}
 
 outputs:
   web_private_ip:

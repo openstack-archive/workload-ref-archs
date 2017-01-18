@@ -1,16 +1,17 @@
-heat_template_version: 2016-04-08
+heat_template_version: 2016-10-14
 
 description: >
-  This is a nested Heat used by the 3-Tier Architecture Workload reference document
+  This is a nested Heat used by the Web Applications Workload Reference Architecture
   created by the Enterprise Working Group.  These templates demonstrate a sample
   LAMP architecture supporting Wordpress. This template file creates 3 separate
-  private networks, two load balancers(LBaaS V1), and creates 3 security groups.
+  private networks, two load balancers(LBaaS V2), and creates 3 security groups.
   This serves as a guide to new users and is not meant for production deployment.
 
   REQUIRED PARAMETERS:
   public_network_id
 
   #Created by: Craig Sterrett 3/23/2016
+  #Updated by: Craig Sterrett 1/3/2017 to support LBaaS V2 and Newton
 
 parameters:
   public_network_id:
@@ -19,6 +20,9 @@ parameters:
     description: >
       REQUIRED PARAMETER - The public network name or id used to access the internet.
       This will fail if this is not a true public network
+    constraints:
+      - custom_constraint: neutron.network
+        description: Must be a valid public network on your cloud
 
   dns_nameserver:
     type: comma_delimited_list
@@ -26,9 +30,9 @@ parameters:
     description: The IP address of a DNS nameserver
     default: 8.8.8.8,8.8.4.4
 
+#####################################################
 resources:
 #Create 3 private Networks, one for each Tier
-
 # create a private network/subnet for the web servers
   web_private_network:
     type: OS::Neutron::Net
@@ -37,16 +41,19 @@ resources:
 
   web_private_network_subnet:
     type: OS::Neutron::Subnet
+    #depends_on makes sure that a resource is created prior to a get_resource command
+    #otherwise you may have race conditions and a stack will work sometimes and not others
+    depends_on: [web_private_network]
     properties:
       cidr: 192.168.100.0/24
+      #start IP allocation at .10 to allow room for the hard coded port IPs
+      allocation_pools: [{ "start": 192.168.100.10, "end": 192.168.100.200 }]
       #Need to define default gateway in order for LBaaS namespace to pick it up
       #If you let neutron grant a default gateway IP, then the LBaaS namespace may
       #not pick it up and you will have routing issues
       gateway_ip: 192.168.100.4
-      allocation_pools: [{ "start": 192.168.100.10, "end": 192.168.100.200 }]
-      #This routing information will get passed to the instances as they startup
-      #Provide the routes to the App network otherwise everything will try to go out the
-      #default gateway
+      #Need to add a route from web network to app network otherwise everything will go
+      #out the default route
       host_routes: [{"destination": 192.168.101.0/24, "nexthop": 192.168.100.5}]
       network: { get_resource: web_private_network }
       name: Web_Tier_private_subnet
@@ -64,6 +71,8 @@ resources:
 # attach the web private network to the public router
   public_router_interface:
     type: OS::Neutron::RouterInterface
+    #Make sure the public router and web subnet have been created first
+    depends_on: [public_router, web_private_network_subnet]
     properties:
       router: { get_resource: public_router }
       subnet: { get_resource: web_private_network_subnet }
@@ -77,14 +86,15 @@ resources:
 
   App_private_network_subnet:
     type: OS::Neutron::Subnet
+    depends_on: [App_private_network]
     properties:
       cidr: 192.168.101.0/24
+      #start IP allocation at .10 to allow room for the hard coded gateway IPs
+      allocation_pools: [{ "start": 192.168.101.10, "end": 192.168.101.200 }]
       #Need to define default gateway in order for LBaaS namespace to pick it up
       #If you let neutron grant a default gateway IP, then the LBaaS namespace may
       #not pick it up and you will have routing issues
       gateway_ip: 192.168.101.5
-      #setting aside lower IP's to leave room for routers
-      allocation_pools: [{ "start": 192.168.101.10, "end": 192.168.101.200 }]
       #This routing information will get passed to the instances as they startup
       #Provide both the routes to the DB nework and to the web network
       host_routes: [{"destination": 192.168.100.0/24, "nexthop": 192.168.101.5}, {"destination": 192.168.102.0/24, "nexthop": 192.168.101.6}, {"destination": 0.0.0.0/24, "nexthop": 192.168.100.4}]
@@ -103,6 +113,7 @@ resources:
 # Create a port connecting the App_router to the App network
   web_router_app_port:
     type: OS::Neutron::Port
+    depends_on: [App_private_network]
     properties:
       name: "App_Net_Port"
       network: { get_resource: App_private_network }
@@ -113,6 +124,7 @@ resources:
 # Create a port connecting the App_router to the Web network
   web_router_web_port:
     type: OS::Neutron::Port
+    depends_on: [web_private_network]
     properties:
       name: "Web_Net_Port"
       network: { get_resource: web_private_network }
@@ -120,12 +132,14 @@ resources:
 
   App_router_interface1:
     type: OS::Neutron::RouterInterface
+    depends_on: [App_router, web_router_app_port]
     properties:
       router: { get_resource: App_router }
       port: { get_resource: web_router_app_port }
 
   App_router_interface2:
     type: OS::Neutron::RouterInterface
+    depends_on: [App_router, web_router_web_port]
     properties:
       router: { get_resource: App_router }
       port: { get_resource: web_router_web_port }
@@ -134,83 +148,66 @@ resources:
 #Create two Load Balancers one for the Web tier with a public IP and one for the App Tier
 #with only private network access
 
-#LBaaS V1 Load Balancer for Web Tier
+#LBaaS V2 Load Balancer for Web Tier
   Web_Tier_LoadBalancer:
-    type: OS::Neutron::LoadBalancer
+    type: OS::Neutron::LBaaS::LoadBalancer
+    depends_on: [web_private_network_subnet,public_router_interface]
+    properties:
+      name: Web_LoadBalancer
+      vip_subnet: {get_resource: web_private_network_subnet}
+
+#LBaaS V2 Listener for Web server pool
+  Web_Tier_Listener:
+    type: OS::Neutron::LBaaS::Listener
+    depends_on: [Web_Tier_LoadBalancer]
     properties:
       protocol_port: 80
-      pool_id: {get_resource: Web_Server_Pool}
+      protocol: TCP
+      loadbalancer: {get_resource: Web_Tier_LoadBalancer }
 
-#LBaaS V1 Monitor for Web Tier
-  Web_Tier_Monitor:
-    type: OS::Neutron::HealthMonitor
-    properties:
-      type: TCP
-      delay: 5
-      max_retries: 5
-      timeout: 5
-
-#LBaaS V1 Pool for Web Tier
+#LBaaS V2 Pool for Web server pool
   Web_Server_Pool:
-    type: OS::Neutron::Pool
+    type: OS::Neutron::LBaaS::Pool
+    depends_on: [Web_Tier_Listener]
     properties:
-      protocol: HTTP
-      monitors: [{get_resource: Web_Tier_Monitor}]
-      subnet: {get_resource: web_private_network_subnet}
-      lb_method: ROUND_ROBIN
-      vip:
-        protocol_port: 80
-
-# Create a VIP port
-  web_vip_port:
-    type: OS::Neutron::Port
-    properties:
-      network: { get_resource: web_private_network }
-      security_groups: [{ get_resource: web_security_group }]
-      fixed_ips:
-        - subnet_id:  { get_resource: web_private_network_subnet }
+      lb_algorithm: ROUND_ROBIN
+      listener: {get_resource: Web_Tier_Listener }
+      protocol: TCP
 
 #  Floating_IP:
   Web_Network_Floating_IP:
     type: OS::Neutron::FloatingIP
+    depends_on: [Web_Tier_LoadBalancer,public_router_interface]
     properties:
       floating_network: {get_param: public_network_id}
-      port_id: { get_resource: web_vip_port }
-
-#  Associate the Floating IP:
-  association:
-    type: OS::Neutron::FloatingIPAssociation
-    properties:
-      floatingip_id: { get_resource: Web_Network_Floating_IP }
-      port_id: { get_attr: [ Web_Server_Pool, vip, port_id ] }
+      port_id: { get_attr: [ Web_Tier_LoadBalancer, vip_port_id ] }
 
 #****************************************
-#App Load Balancer
+#LBaaS V2 Load Balancer for App Tier
   App_Tier_LoadBalancer:
-    type: OS::Neutron::LoadBalancer
+    type: OS::Neutron::LBaaS::LoadBalancer
+    depends_on: [App_private_network_subnet]
+    properties:
+      name: App_LoadBalancer
+      vip_subnet: {get_resource: App_private_network_subnet}
+
+#LBaaS V2 Listener for App server pool
+  App_Tier_Listener:
+    type: OS::Neutron::LBaaS::Listener
+    depends_on: [App_Tier_LoadBalancer]
     properties:
       protocol_port: 80
-      pool_id: {get_resource: App_Server_Pool}
+      protocol: TCP
+      loadbalancer: {get_resource: App_Tier_LoadBalancer }
 
-#LBaaS V1 Monitor for App Tier
-  App_Tier_Monitor:
-    type: OS::Neutron::HealthMonitor
-    properties:
-      type: TCP
-      delay: 5
-      max_retries: 5
-      timeout: 5
-
-#LBaaS V1 Pool for App Tier
+#LBaaS V2 Pool for App server pool
   App_Server_Pool:
-    type: OS::Neutron::Pool
+    type: OS::Neutron::LBaaS::Pool
+    depends_on: [App_Tier_Listener]
     properties:
-      protocol: HTTP
-      monitors: [{get_resource: App_Tier_Monitor}]
-      subnet_id: {get_resource: App_private_network_subnet}
-      lb_method: ROUND_ROBIN
-      vip:
-        protocol_port: 80
+      lb_algorithm: ROUND_ROBIN
+      listener: {get_resource: App_Tier_Listener }
+      protocol: TCP
 
 #############################
 # create a private network/subnet for the Database servers
@@ -221,11 +218,12 @@ resources:
 
   DB_private_network_subnet:
     type: OS::Neutron::Subnet
+    depends_on: [DB_private_network]
     properties:
       cidr: 192.168.102.0/24
-      gateway_ip: 192.168.102.6
+      #start IP allocation at .10 to allow room for the hard coded gateway IPs
       allocation_pools: [{ "start": 192.168.102.10, "end": 192.168.102.200 }]
-      host_routes: [{"destination": 192.168.101.0/24, "nexthop": 192.168.102.6}]
+      gateway_ip: 192.168.102.6
       network: { get_resource: DB_private_network }
       dns_nameservers: { get_param: dns_nameserver }
       enable_dhcp: true
@@ -240,6 +238,7 @@ resources:
 # Create a port connecting the db_router to the db network
   db_router_db_port:
     type: OS::Neutron::Port
+    depends_on: [DB_private_network]
     properties:
       network: { get_resource: DB_private_network }
       name: "DB_Net_Port"
@@ -248,6 +247,7 @@ resources:
 # Create a port connecting the db_router to the app network
   db_router_app_port:
     type: OS::Neutron::Port
+    depends_on: [App_private_network]
     properties:
       network: { get_resource: App_private_network }
       name: "DB_Router_App_Port"
@@ -256,12 +256,14 @@ resources:
 # Now lets add our ports to our router
   db_router_interface1:
     type: OS::Neutron::RouterInterface
+    depends_on: [DB_router,db_router_db_port]
     properties:
       router: { get_resource: DB_router }
       port: { get_resource: db_router_db_port }
 
   db_router_interface2:
     type: OS::Neutron::RouterInterface
+    depends_on: [DB_router,db_router_app_port]
     properties:
       router: { get_resource: DB_router }
       port: { get_resource: db_router_app_port }
@@ -322,9 +324,15 @@ outputs:
   web_private_network_id:
     description: Web private network ID
     value: {get_resource: web_private_network}
+  web_private_subnet_id:
+    description: Web private subnet ID
+    value: {get_resource: web_private_network_subnet}
   app_private_network_id:
     description: App private network ID
     value: {get_resource: App_private_network}
+  app_private_subnet_id:
+    description: App private subnet ID
+    value: {get_resource: App_private_network_subnet}
   db_security_group_id:
     description: Database security group ID
     value: {get_resource: db_security_group}
@@ -345,4 +353,4 @@ outputs:
     value: { get_attr: [ Web_Network_Floating_IP, floating_ip_address ] }
   app_lbaas_IP:
     description: Internal floating IP assigned to app LBaaS
-    value: {get_attr: [ App_Server_Pool, vip, address]}
+    value: {get_attr: [ App_Tier_LoadBalancer, vip_address]}
