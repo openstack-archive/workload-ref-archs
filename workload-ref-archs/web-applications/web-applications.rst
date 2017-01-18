@@ -39,7 +39,7 @@ optionally, auto-scaling.
 
 Figure 1: Three-tier web application architecture overview
 
-.. figure:: figures/figure1.png
+.. figure:: figures/figure01.png
    :alt: Figure 1: Three-tier web application architecture overview
 
 OpenStack for Web Applications
@@ -75,7 +75,7 @@ the services to confirm are available in your OpenStack cloud.
 
 Figure 2. Logical representation of OpenStack services for web applications
 
-.. figure:: figures/figure2.png
+.. figure:: figures/figure02.png
    :alt: Figure 2. Logical representation of OpenStack services for web applications
 
 Brief descriptions of the core and optional services used for simple
@@ -133,7 +133,7 @@ For further details: `OpenStack Conceptual Architecture Diagram <http://docs.ope
 
 Figure 3. Functional interaction between OpenStack components
 
-.. figure:: figures/figure3.png
+.. figure:: figures/figure03.png
    :alt: Figure 3. Functional interaction between OpenStack components
 
 Structuring an OpenStack Web Application
@@ -178,7 +178,7 @@ OpenStack-based web application.
 
 Figure 4: OpenStack web application architecture
 
-.. figure:: figures/figure4.png
+.. figure:: figures/figure04.png
    :alt: Figure 4: OpenStack web application architecture
 
 Load balancing
