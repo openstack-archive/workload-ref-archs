@@ -90,4 +90,5 @@ credential file from Horizon under Project>Compute>Access & Security>API Access
   openstack stack create --template WebAppStatic.yaml --parameter ssh_key_name=mykey --parameter image_id=ubuntu --parameter dns_nameserver="8.8.8.8,8.8.4.4" --parameter public_network_id=external_network ThreeTierLAMP
 
 **Example to setup the autoscaling environment**::
+
   openstack stack create --template WebAppAutoScaling.yaml --parameter ssh_key_name=mykey --parameter image_id=centos --parameter dns_nameserver="8.8.8.8,8.8.4.4" --parameter public_network_id=external_network ThreeTierLAMP
