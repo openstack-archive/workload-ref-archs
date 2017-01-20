@@ -1,0 +1,881 @@
+### Heat Template ###
+heat_template_version: 2014-10-16
+
+description: >
+  Generated template
+
+parameters:
+  network_external_for_floating_ip:
+    default: 38a4e580-e368-4404-a2e0-cbef9343740e
+    description: Network to allocate floating IP from
+    type: string
+	
+  network_router_0_external:
+    default: 38a4e580-e368-4404-a2e0-cbef9343740e
+    description: Router external network
+    type: string
+	
+  network_router_1_external:
+    default: 38a4e580-e368-4404-a2e0-cbef9343740e
+    description: Router external network
+    type: string
+	
+  network_router_2_external:
+    default: 38a4e580-e368-4404-a2e0-cbef9343740e
+    description: Router external network
+    type: string
+	
+  image_ubuntu:
+    default: a808eacb-ab6f-4929-873d-be3ae8535f0d 
+    description: An Ubuntu cloud image (glance image id) to use for all server
+    type: string
+	
+  flavor_edge:
+    default: l1.medium
+    description: Flavor to use for edge server 
+    type: string
+	
+  flavor_master:
+    default: l1.medium
+    description: Flavor to use for master server
+    type: string
+	
+  flavor_data:
+    default: l1.medium
+    description: Flavor to use for worker server
+    type: string
+	
+  flavor_repo:
+    default: l1.medium
+    description: Flavor to use for repository server
+    type: string
+
+  config_dns_nameserver:
+    default: 8.8.8.8
+    description: DNS Server for external Access (Temporary)
+    type: string
+	
+resources:
+  deploymentscript:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      inputs:
+      - name: previous
+        default: 'NONE'
+      group: script
+      config:
+        str_replace:
+          params:
+            $variable1: "Test"
+          template: | 
+            #!/bin/bash
+            case  $(hostname) in
+             *edge*)
+                    SYSTEMTYPE="edge";
+                  ;;
+             *master*)
+                    SYSTEMTYPE="master";
+                  ;;
+             *data*)
+                    SYSTEMTYPE="data";
+                  ;;
+             *repo*)
+                    SYSTEMTYPE="repo";
+                  ;;
+                  *)
+                    SYSTEMTYPE="nothing";
+                  ;;
+            esac
+            
+            FULLHOSTNAME=$(curl http://169.254.169.254/latest/meta-data/hostname)
+            SHORTHOSTNAME=$(echo $FULLHOSTNAME | awk -F'.' {'print $1'})
+            DOMAIN=$(echo $FULLHOSTNAME | awk -F'.' {'print $NF'})
+            MASTERNODE=master-node
+            
+            function issue_start {
+             echo ${@}: started >> /etc/issue
+            }
+            
+            function issue_end {
+             if [ "$1" -eq "0" ]; then
+              echo ${@:2}: success >> /etc/issue
+             else
+              echo ${@:2}: failed >> /etc/issue
+             fi
+            }
+            
+            function set_local_hosts {
+             # Set hostname
+             ip -o a | grep "inet " | grep -v "^1: lo" | awk -F"/" {'print $1'} | awk {'print $4 " HOSTNAME-"$2".DOMAIN HOSTNAME-"$2'} | sed s/HOSTNAME/$HOSTNAME/g | sed s/DOMAIN/$DOMAIN/g > /mnt/shared/host-$HOSTNAME.txt
+            
+             # Change eth to networkname
+             COUNT=0;
+             for i in ${@}; do
+              sed -i s/eth${COUNT}/$i/g /mnt/shared/host-$HOSTNAME.txt
+              COUNT=$(($COUNT + 1));
+             done
+             sed -i s/-Cluster-Network//g /mnt/shared/host-$HOSTNAME.txt
+            }
+
+            if [ "$SYSTEMTYPE" == "repo" ]; then
+             issue_start nfsserver
+             apt-get -y install nfs-server
+             mkdir /shared
+             chmod 777 /shared
+             echo "/shared *(rw)" >> /etc/exports
+             service nfs-kernel-server start
+             issue_end $? nfsserver
+             
+             # Set SSH Key
+             ssh-keygen -b 4096 -t rsa -f /root/.ssh/id_rsa -N ''
+             cp -rp /root/.ssh/id_rsa.pub /shared
+            fi
+            
+            cp -rp /etc/issue /etc/issue.orig
+
+            issue_start GroupCheck
+            echo "SYSTEMTYPE: $SYSTEMTYPE" >> /root/output.txt
+            echo "params: $variable1" >> /root/output.txt
+            issue_end $? GroupCheck   
+            
+            # Format Partition
+            issue_start Prepare /dev/vdb
+            mkfs.ext4 /dev/vdb
+            # /hadoop
+            mkdir /hadoop
+            echo "/dev/vdb /hadoop ext4 defaults 0 0" >> /etc/fstab
+            mount /hadoop
+            issue_end $? Prepare /dev/vdb
+
+            # Set multiple network adapters
+            issue_start dhclient
+            ip a | grep mtu | grep -v lo: | awk {'print "dhclient "$2'} | sed s/:$//g | bash
+            issue_end $? dhclient
+            
+            issue_start set ulimits
+            cat << EOF >> /etc/security/limits.conf
+            * - nofile 32768
+            * - nproc 65536
+            EOF
+            issue_end $? set ulimits
+            
+            issue_start deactivate transparent huge pages
+            cat << EOF > /etc/rc.local
+            #!/bin/bash
+            if test -f /sys/kernel/mm/transparent_hugepage/enabled; then
+             echo "never" > /sys/kernel/mm/transparent_hugepage/enabled
+            fi
+            if test -f /sys/kernel/mm/transparent_hugepage/defrag; then
+             echo "never" > /sys/kernel/mm/transparent_hugepage/defrag
+            fi
+            EOF
+            /bin/bash /etc/rc.local
+            issue_end $? deactivate transparent huge pages
+            
+
+            # Mount NFS Share
+            issue_start mount nfs share
+            apt-get -y install nfs-common
+            mkdir /mnt/shared
+            
+            # Check if mount is available
+            while [ ! "$(showmount -e 10.20.7.5)" ]; do 
+             issue_end 1 mount nfs share: not available at present
+            done
+            
+            mount 10.20.7.5:/shared /mnt/shared
+            issue_end $? mount nfs share
+
+            # Set Admin SSH Key for easy access
+            issue_start set admin ssh key
+            cat /mnt/shared/id_rsa.pub >> /root/.ssh/authorized_keys
+            issue_end $? set admin ssh key
+
+            # Save Hostnames to /mnt/shared
+            issue_start gathering hostnames
+            case  $SYSTEMTYPE in
+             edge)
+                    set_local_hosts admin Cluster-Network edge
+                  ;;
+             master)
+                    set_local_hosts admin Cluster-Network Object-Storage-Connect-Network Management
+                  ;;
+             data)
+                    set_local_hosts admin Cluster-Network Object-Storage-Connect-Network Management
+                  ;;
+             repo)
+                    set_local_hosts admin Cluster-Network edge
+                  ;;
+                  *)
+                    set_local_hosts normal 
+                  ;;
+            esac
+            issue_end $? gathering hostnames
+
+            # Set local /etc/hosts
+            issue_start hosts_localhost
+            echo "127.0.0.1 $FULLHOSTNAME $SHORTHOSTNAME" >> /etc/hosts
+            issue_end $? hosts_localhost
+            
+            # Configure Name Server
+            #issue_start nameserver
+            #echo "nameserver 8.8.8.8" > /etc/resolv.conf
+            #issue_end $? nameserver
+            
+            # Configure Time-Server
+            issue_start Install ntp
+            apt-get -y install ntp
+            issue_end $? Install ntp
+            
+            # Deactivate Swappiness 
+            issue_start Deactivate swappiness
+            echo "vm.swappiness=1" >> /etc/sysctl.conf
+            sysctl -w vm.swappiness=1
+            issue_end $? Deactivate swappiness
+            
+            # Activate Hortonworks Repository
+            issue_start Installation ambari-agent
+            wget -nv http://public-repo-1.hortonworks.com/ambari/ubuntu14/2.x/updates/2.4.0.1/ambari.list -O /etc/apt/sources.list.d/ambari.list
+            apt-key adv --recv-keys --keyserver keyserver.ubuntu.com B9733A7A07513CAD
+            apt-get update
+            apt-get -y install ambari-agent
+            sed -i s/hostname=localhost/hostname=${MASTERNODE}.$DOMAIN/g /etc/ambari-agent/conf/ambari-agent.ini
+            issue_end $? Installation ambari-agent
+            
+            # Install Java 1.8 
+            issue_start java
+            echo "\n" | add-apt-repository ppa:webupd8team/java
+            apt-get update
+            # Accept Licence
+            echo debconf shared/accepted-oracle-license-v1-1 select true | debconf-set-selections
+            echo debconf shared/accepted-oracle-license-v1-1 seen true | debconf-set-selections
+            apt-get -y  install oracle-java8-installer
+            issue_end $? java
+            
+            # Set all /etc/hosts
+            issue_start hosts
+            cp -rp /etc/hosts /tmp/hosts-original
+            cat /tmp/hosts-original | grep -v "127.0.0.1 $FULLHOSTNAME" > /etc/hosts
+            cat /mnt/shared/host*.txt >> /etc/hosts
+            issue_end $? hosts
+            
+            ###################### Individual parts ######################
+            if [ "$SYSTEMTYPE" == "master" ]; then
+             issue_start ambari-server
+             apt-get -y install ambari-server expect
+             JAVA_HOME="/usr/lib/jvm/java-8-oracle/jre/"
+             
+             SETUP_AMBARI=$(expect -c "
+             set timeout 60
+             spawn ambari-server setup -j $JAVA_HOME
+             expect 	\"Customize user account for ambari-server daemon\" {send \"n\r\"}
+             expect \"Enter advanced database configuration\" {send \"n\r\"}
+             expect eof
+             ")
+             echo "${SETUP_AMBARI}"
+             touch /mnt/shared/ambari-server-installed.txt
+             service ambari-server start
+             issue_end $? ambari-server
+            fi
+            
+            if [ "$SYSTEMTYPE" == "repo" ]; then
+             issue_start puppetmaster
+             apt-get -y install puppetmaster
+             issue_end $? puppetmaster
+            fi
+            
+            issue_start Start Ambari Agent
+            # Start ambari Agent
+            # Checks if /mnt/shared/ambari-server-installed.txt exists
+            while [ ! "$(ls /mnt/shared/ambari-server-installed.txt)" ]; do
+             issue_end 1 Check if Ambaris Server is installed $(date)
+             sleep 60 
+            done
+            service ambari-agent start
+            issue_end $? Start Ambari Agent
+ 
+            issue_end 0 Finished
+            
+  volume_0:
+    properties:
+      metadata:
+        attached_mode: rw
+        readonly: 'False'
+        bootable: 'False'
+      size: 10
+    type: OS::Cinder::Volume
+	
+  volume_1:
+    properties:
+      metadata:
+        attached_mode: rw
+        readonly: 'False'
+        bootable: 'False'
+      size: 10
+    type: OS::Cinder::Volume
+	
+  volume_2:
+    properties:
+      metadata:
+        attached_mode: rw
+        readonly: 'False'
+        bootable: 'False'
+      size: 10
+    type: OS::Cinder::Volume
+	
+  volume_3:
+    properties:
+      metadata:
+        attached_mode: rw
+        readonly: 'False'
+        bootable: 'False'
+      size: 10
+    type: OS::Cinder::Volume
+	
+  volume_4:
+    properties:
+      metadata:
+        attached_mode: rw
+        readonly: 'False'
+        bootable: 'False'
+      size: 10
+    type: OS::Cinder::Volume
+	
+  volume_5:
+    properties:
+      metadata:
+        attached_mode: rw
+        readonly: 'False'
+        bootable: 'False'
+      size: 10
+    type: OS::Cinder::Volume
+	
+  floatingip_0:
+    properties:
+      floating_network_id:
+        get_param: network_external_for_floating_ip
+    type: OS::Neutron::FloatingIP
+	
+  key_0:
+    properties:
+      name: demo1
+      public_key: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDayVuy2lZ11GuFVQmA402tZvDl7CopLCSPNZn/IqVvdA5A4XtocQnkZVUegQYJ8XMz9RMPAi/0LreUQbaS4/mSDtjAs0GupAbFeMumjzlwdmZEmgCO+iEwkawmXiARV/7A1qZT+5WP7hVJk9svQv2BAiHiXugGQPx4TlRCnMOJZf3T5LmIeNh1XgzWpcmj7NX97hs12iiIBu7HWALgyrp5qshZo0y1vxnedSIQgwnOQiFx0/fUAL7k1pioE7fe88rwQegMDibSeTvDgABLhJUOtC6Gv8kp02XuoOoAecrlqIRfBASQQf7aaNs9oIBiJ4U6Jt6ladHlB/fKpqMbPllf 
+    type: OS::Nova::KeyPair
+	
+  network_1:
+    properties:
+      admin_state_up: true
+      name: Cluster-Network
+      shared: false
+    type: OS::Neutron::Net
+	
+  subnet_1:
+    properties:
+      allocation_pools:
+      - end: 10.20.1.100
+        start: 10.20.1.10
+      cidr: 10.20.1.0/24
+      dns_nameservers: [ {get_param: config_dns_nameserver} ]
+      enable_dhcp: true
+      host_routes: []
+      ip_version: 4
+      name: subCluster-Network
+      network_id:
+        get_resource: network_1
+    type: OS::Neutron::Subnet
+	
+  network_2:
+    properties:
+      admin_state_up: true
+      name: Object-Storage-Connect-Network
+      shared: false
+    type: OS::Neutron::Net
+	
+  subnet_2:
+    properties:
+      allocation_pools:
+      - end: 10.20.2.100
+        start: 10.20.2.10
+      cidr: 10.20.2.0/24
+      dns_nameservers: [ {get_param: config_dns_nameserver} ]
+      enable_dhcp: true
+      host_routes: []
+      ip_version: 4
+      name: subObject-Storage-Connect-Network
+      network_id:
+        get_resource: network_2
+    type: OS::Neutron::Subnet
+	
+  network_3:
+    properties:
+      admin_state_up: true
+      name: Object-Storage-Cluster-Network 
+      shared: false
+    type: OS::Neutron::Net
+	
+  subnet_3:
+    properties:
+      allocation_pools:
+      - end: 10.20.3.100
+        start: 10.20.3.10
+      cidr: 10.20.3.0/24
+      dns_nameservers: [ {get_param: config_dns_nameserver} ]
+      enable_dhcp: true
+      host_routes: []
+      ip_version: 4
+      name: subObject-Storage-Cluster-Network
+      network_id:
+        get_resource: network_3
+    type: OS::Neutron::Subnet
+	
+  network_4:
+    properties:
+      admin_state_up: true
+      name: Management
+      shared: false
+    type: OS::Neutron::Net
+	
+  subnet_4:
+    properties:
+      allocation_pools:
+      - end: 10.20.4.100
+        start: 10.20.4.10
+      cidr: 10.20.4.0/24
+      dns_nameservers: [ {get_param: config_dns_nameserver} ]
+      enable_dhcp: true
+      host_routes: []
+      ip_version: 4
+      name: subManagement
+      network_id:
+        get_resource: network_4
+    type: OS::Neutron::Subnet
+	
+  network_5:
+    properties:
+      admin_state_up: true
+      name: Storage-Access-Network
+      shared: false
+    type: OS::Neutron::Net
+	
+  subnet_5:
+    properties:
+      allocation_pools:
+      - end: 10.20.5.100
+        start: 10.20.5.10
+      cidr: 10.20.5.0/24
+      dns_nameservers: [ {get_param: config_dns_nameserver} ]
+      enable_dhcp: true
+      host_routes: []
+      ip_version: 4
+      name: subStorage-Access-Network
+      network_id:
+        get_resource: network_5
+    type: OS::Neutron::Subnet
+	
+  network_6:
+    properties:
+      admin_state_up: true
+      name: Edge
+      shared: false
+    type: OS::Neutron::Net
+	
+  subnet_6:
+    properties:
+      allocation_pools:
+      - end: 10.20.6.100
+        start: 10.20.6.10
+      cidr: 10.20.6.0/24
+      dns_nameservers: [ {get_param: config_dns_nameserver} ]
+      enable_dhcp: true
+      host_routes: []
+      ip_version: 4
+      name: subEdge
+      network_id:
+        get_resource: network_6
+    type: OS::Neutron::Subnet
+	
+  network_7:
+    properties:
+      admin_state_up: true
+      name: Admin
+      shared: false
+    type: OS::Neutron::Net
+	
+  subnet_7:
+    properties:
+      allocation_pools:
+      - end: 10.20.7.100
+        start: 10.20.7.10
+      cidr: 10.20.7.0/24
+      dns_nameservers: [ {get_param: config_dns_nameserver} ]
+      enable_dhcp: true
+      host_routes: []
+      ip_version: 4
+      name: subAdmin
+      network_id:
+        get_resource: network_7
+    type: OS::Neutron::Subnet
+	
+  router_0:
+    properties:
+      admin_state_up: true
+      name: Router_Storage
+    type: OS::Neutron::Router
+	
+  router_0_gateway:
+    properties:
+      network_id:
+        get_param: network_router_0_external
+      router_id:
+        get_resource: router_0
+    type: OS::Neutron::RouterGateway
+	
+  router_0_interface_0:
+    properties:
+      router_id:
+        get_resource: router_0
+      subnet_id:
+        get_resource: subnet_3
+    type: OS::Neutron::RouterInterface
+	
+  router_1:
+    properties:
+      admin_state_up: true
+      name: Router_Ext
+    type: OS::Neutron::Router
+	
+  router_1_gateway:
+    properties:
+      network_id:
+        get_param: network_router_1_external
+      router_id:
+        get_resource: router_1
+    type: OS::Neutron::RouterGateway
+	
+  router_1_interface_0:
+    properties:
+      router_id:
+        get_resource: router_1
+      subnet_id:
+        get_resource: subnet_5
+    type: OS::Neutron::RouterInterface
+	
+  router_2:
+    properties:
+      admin_state_up: true
+      name: Router_Admin
+    type: OS::Neutron::Router
+	
+  router_2_gateway:
+    properties:
+      network_id:
+        get_param: network_router_2_external
+      router_id:
+        get_resource: router_2
+    type: OS::Neutron::RouterGateway
+	
+  router_2_interface_0:
+    properties:
+      router_id:
+        get_resource: router_2
+      subnet_id:
+        get_resource: subnet_7
+    type: OS::Neutron::RouterInterface
+	
+  security_group_0:
+    properties:
+      description: ''
+      name: master
+      rules:
+      - direction: ingress
+        ethertype: IPv4
+        protocol: icmp
+        remote_ip_prefix: 0.0.0.0/0
+      - direction: egress
+        ethertype: IPv6
+      - direction: ingress
+        ethertype: IPv4
+        port_range_max: 65535
+        port_range_min: 1
+        protocol: udp
+        remote_ip_prefix: 0.0.0.0/0
+      - direction: egress
+        ethertype: IPv4
+      - direction: ingress
+        ethertype: IPv4
+        port_range_max: 65535
+        port_range_min: 1
+        protocol: tcp
+        remote_ip_prefix: 0.0.0.0/0
+    type: OS::Neutron::SecurityGroup
+	
+  security_group_1:
+    properties:
+      description: ''
+      name: data
+      rules:
+      - direction: ingress
+        ethertype: IPv4
+        protocol: icmp
+        remote_ip_prefix: 0.0.0.0/0
+      - direction: egress
+        ethertype: IPv6
+      - direction: ingress
+        ethertype: IPv4
+        port_range_max: 65535
+        port_range_min: 1
+        protocol: udp
+        remote_ip_prefix: 0.0.0.0/0
+      - direction: egress
+        ethertype: IPv4
+      - direction: ingress
+        ethertype: IPv4
+        port_range_max: 65535
+        port_range_min: 1
+        protocol: tcp
+        remote_ip_prefix: 0.0.0.0/0
+    type: OS::Neutron::SecurityGroup
+	
+  security_group_3:
+    properties:
+      description: ''
+      name: edge
+      rules:
+      - direction: ingress
+        ethertype: IPv4
+        protocol: icmp
+        remote_ip_prefix: 0.0.0.0/0
+      - direction: ingress
+        ethertype: IPv4
+        port_range_max: 65535
+        port_range_min: 1
+        protocol: tcp
+        remote_ip_prefix: 0.0.0.0/0
+      - direction: egress
+        ethertype: IPv4
+      - direction: ingress
+        ethertype: IPv4
+        port_range_max: 65535
+        port_range_min: 1
+        protocol: udp
+        remote_ip_prefix: 0.0.0.0/0
+      - direction: egress
+        ethertype: IPv6
+    type: OS::Neutron::SecurityGroup
+	
+  security_group_6:
+    properties:
+      description: ''
+      name: Admin
+      rules:
+      - direction: ingress
+        ethertype: IPv4
+        protocol: icmp
+        remote_ip_prefix: 0.0.0.0/0
+      - direction: egress
+        ethertype: IPv6
+      - direction: ingress
+        ethertype: IPv4
+        port_range_max: 65535
+        port_range_min: 1
+        protocol: udp
+        remote_ip_prefix: 0.0.0.0/0
+      - direction: egress
+        ethertype: IPv4
+      - direction: ingress
+        ethertype: IPv4
+        port_range_max: 65535
+        port_range_min: 1
+        protocol: tcp
+        remote_ip_prefix: 0.0.0.0/0
+    type: OS::Neutron::SecurityGroup
+	
+  server_0:
+    type: OS::Nova::Server
+    depends_on: [ volume_0, subnet_1, subnet_2, subnet_3, subnet_4, subnet_5, subnet_6, subnet_7, server_5 ]
+    properties:
+      name: data-node-3
+      diskConfig: AUTO
+      flavor:
+        get_param: flavor_data
+      image:
+        get_param: image_ubuntu
+      key_name:
+        get_resource: key_0
+      networks:
+      - network:
+          get_resource: network_7
+      - network:
+          get_resource: network_1
+      - network:
+          get_resource: network_2
+      - network:
+          get_resource: network_3
+      security_groups:
+      - get_resource: security_group_1
+      block_device_mapping_v2:
+      - device_name: /dev/vdb
+        boot_index: 1
+        volume_id:
+          get_resource: volume_0
+      user_data_format: SOFTWARE_CONFIG
+      user_data: {get_resource: deploymentscript}
+	  
+  server_1:
+    type: OS::Nova::Server
+    depends_on: [ volume_1, subnet_1, subnet_2, subnet_3, subnet_4, subnet_5, subnet_6, subnet_7, server_5 ]
+    properties:
+      name: data-node-2
+      diskConfig: AUTO
+      flavor:
+        get_param: flavor_data
+      image:
+        get_param: image_ubuntu
+      key_name:
+        get_resource: key_0
+      networks:
+      - network:
+          get_resource: network_7
+      - network:
+          get_resource: network_1
+      - network:
+          get_resource: network_2
+      - network:
+          get_resource: network_4
+      security_groups:
+      - get_resource: security_group_1
+      block_device_mapping_v2:
+      - device_name: /dev/vdb
+        boot_index: 1
+        volume_id:
+          get_resource: volume_1
+      user_data_format: SOFTWARE_CONFIG
+      user_data: {get_resource: deploymentscript}
+	  
+  server_2:
+    type: OS::Nova::Server
+    depends_on: [ volume_2, subnet_1, subnet_2, subnet_3, subnet_4, subnet_5, subnet_6, subnet_7, server_5 ]
+    properties:
+      name: data-node-1
+      diskConfig: AUTO
+      flavor:
+        get_param: flavor_data
+      image:
+        get_param: image_ubuntu
+      key_name:
+        get_resource: key_0
+      networks:
+      - network:
+          get_resource: network_7
+      - network:
+          get_resource: network_1
+      - network:
+          get_resource: network_2
+      - network:
+          get_resource: network_4
+      security_groups:
+      - get_resource: security_group_1
+      block_device_mapping_v2:
+      - device_name: /dev/vdb
+        boot_index: 1
+        volume_id:
+          get_resource: volume_2
+      user_data_format: SOFTWARE_CONFIG
+      user_data: {get_resource: deploymentscript}
+	  
+  server_3:
+    type: OS::Nova::Server
+    depends_on: [ volume_3, subnet_1, subnet_2, subnet_3, subnet_4, subnet_5, subnet_6, subnet_7, server_5 ]
+    properties:
+      name: master-node
+      diskConfig: AUTO
+      flavor:
+        get_param: flavor_master
+      image:
+        get_param: image_ubuntu
+      key_name:
+        get_resource: key_0
+      networks:
+      - network:
+          get_resource: network_7
+      - network:
+          get_resource: network_1
+      - network:
+          get_resource: network_2
+      - network:
+          get_resource: network_4
+      security_groups:
+      - get_resource: security_group_0
+      block_device_mapping_v2:
+      - device_name: /dev/vdb
+        boot_index: 1
+        volume_id:
+          get_resource: volume_3
+      user_data_format: SOFTWARE_CONFIG
+      user_data: {get_resource: deploymentscript}
+	  
+  server_4:
+    type: OS::Nova::Server
+    depends_on: [ volume_4, subnet_1, subnet_2, subnet_3, subnet_4, subnet_5, subnet_6, subnet_7, server_5 ]
+    properties:
+      name: edge-server
+      diskConfig: AUTO
+      flavor:
+        get_param: flavor_edge
+      image:
+        get_param: image_ubuntu
+      key_name:
+        get_resource: key_0
+      networks:
+      - network:
+          get_resource: network_7
+      - network:
+          get_resource: network_1
+      - network:
+          get_resource: network_6
+      security_groups:
+      - get_resource: security_group_3
+      block_device_mapping_v2:
+      - device_name: /dev/vdb
+        boot_index: 1
+        volume_id:
+          get_resource: volume_4
+      user_data_format: SOFTWARE_CONFIG
+      user_data: {get_resource: deploymentscript}
+	  
+  server_5:
+    type: OS::Nova::Server
+    depends_on: [ volume_5, subnet_1, subnet_2, subnet_3, subnet_4, subnet_5, subnet_6, subnet_7 ]
+    properties:
+      name: repo-server
+      diskConfig: AUTO
+      flavor:
+        get_param: flavor_repo
+      image:
+        get_param: image_ubuntu
+      key_name:
+        get_resource: key_0
+      networks:
+      - port:
+          get_resource: server_5_port_admin
+      - network:
+          get_resource: network_1
+      - network:
+          get_resource: network_6
+      block_device_mapping_v2:
+      - device_name: /dev/vdb
+        boot_index: 1
+        volume_id:
+          get_resource: volume_5
+      user_data_format: SOFTWARE_CONFIG
+      user_data: {get_resource: deploymentscript}
+	  
+  server_5_port_admin:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_resource: network_7 }
+      security_groups:
+        - get_resource: security_group_6
+      fixed_ips:
+        - subnet_id: { get_resource: subnet_7 }
+          ip_address: 10.20.7.5
