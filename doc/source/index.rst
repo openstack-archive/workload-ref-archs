@@ -1,8 +1,3 @@
-.. workload-ref-archs documentation master file, created by
-   sphinx-quickstart on Tue Jul  9 22:26:36 2013.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
-
 Welcome to workload-ref-archs's documentation!
 ========================================================
 
@@ -15,6 +10,8 @@ Contents:
    installation
    usage
    contributing
+
+   web-applications/web-applications.rst
 
 Indices and tables
 ==================
