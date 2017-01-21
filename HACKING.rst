@@ -35,23 +35,23 @@ Submission Process
 
     git checkout -b <workload-name>
 
-#. Create the following directory structures under `workload-ref-archs <workload-ref-archs>`_
+#. Create the following directory structures under `doc/source <doc/source>`_
    for the new workload::
 
     <workload-name>
     <workload-name>/<workload-name>.rst
-    <workload-name>/figure
+    <workload-name>/figures
     <workload-name>/sample/heat
     <workload-name>/sample/murano
 
    .. list-table::
       :widths: 15 25
 
-      * - <workload-name>.rst 
+      * - <workload-name>.rst
         - Provides a full description of the workload.
-          Please follow the structure in `workload-template.rst <workload-ref-archs/workload-template.rst>`_
+          Please follow the structure in `workload-template.rst <workload-template.rst>`_
 
-      * - figure
+      * - figures
         - Include all images in this folder
 
       * - sample/heat

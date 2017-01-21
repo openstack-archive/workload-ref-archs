@@ -14,7 +14,7 @@ OpenStack for <workload>
 This section provides detailed information on which OpenStack services
 are required to support this workload.
 
-Please include all **core** and **optional** services. 
+Please include all **core** and **optional** services.
 
 Please provide a brief description of each services used in this document.
 For example:
@@ -56,10 +56,15 @@ sufficient information to explain what the sample code is trying to achieve.
 Scope and Assumptions
 ---------------------
 
-This section describe the specific scope, limitation or assumption made for
+This section describes the specific scope, limitation or assumption made for
 this workload reference architecture.
 
 For example: The Heat template provided for this reference architecture
 assumes that the web application workload is deployed in a single-region,
 single-zone OpenStack environment. The deployment in a multi-zone/multi-region
 environment is outside the scope of this document.
+
+Summary
+-------
+
+This section concludes the document.
