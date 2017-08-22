@@ -96,7 +96,7 @@ resources:
       #not pick it up and you will have routing issues
       gateway_ip: 192.168.101.5
       #This routing information will get passed to the instances as they startup
-      #Provide both the routes to the DB nework and to the web network
+      #Provide both the routes to the DB network and to the web network
       host_routes: [{"destination": 192.168.100.0/24, "nexthop": 192.168.101.5}, {"destination": 192.168.102.0/24, "nexthop": 192.168.101.6}, {"destination": 0.0.0.0/24, "nexthop": 192.168.100.4}]
       network: { get_resource: App_private_network }
       name: App_Tier_private_subnet
