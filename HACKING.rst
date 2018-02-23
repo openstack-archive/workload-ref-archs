@@ -2,16 +2,16 @@ workload-ref-archs Style Commandments
 =====================================
 
 - Read the OpenStack Style Commandments
-  http://docs.openstack.org/developer/hacking/
+  https://docs.openstack.org/hacking/latest/
 
 - Read the `OpenStack Documentation Contributor Guide`_,
   especially the `Writing style`_, `RST conventions`_
   and `Diagram guidelines`_
 
-.. _OpenStack Documentation Contributor Guide: http://docs.openstack.org/contributor-guide
-.. _Writing style: http://docs.openstack.org/contributor-guide/writing-style.html
-.. _RST conventions: http://docs.openstack.org/contributor-guide/rst-conv.html
-.. _Diagram guidelines: http://docs.openstack.org/contributor-guide/diagram-guidelines.html
+.. _OpenStack Documentation Contributor Guide: https://docs.openstack.org/contributor-guide
+.. _Writing style: https://docs.openstack.org/contributor-guide/writing-style.html
+.. _RST conventions: https://docs.openstack.org/contributor-guide/rst-conv.html
+.. _Diagram guidelines: https://docs.openstack.org/contributor-guide/diagram-guidelines.html
 
 Proposing a new Workload Reference Architecture
 -----------------------------------------------
@@ -24,7 +24,7 @@ Proposing a new Workload Reference Architecture
 Submission Process
 ------------------
 
-#. Follow the instructions at `First timers <http://docs.openstack.org/contributor-guide/quickstart/first-timers.html>`_
+#. Follow the instructions at `First timers <https://docs.openstack.org/contributor-guide/quickstart/first-timers.html>`_
    to configure a local environment.
 
 #. Clone the repository::
