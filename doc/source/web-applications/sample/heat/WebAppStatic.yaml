@@ -5,7 +5,7 @@ heat_template_version: 2016-10-14
 description: >
   This is the main Heat template for the Web Applications Workload Reference
   Architecture created by the Enterprise Working Group.
-  This version of the tempalte does not include autoscaling, and does not require ceilometer.
+  This version of the template does not include autoscaling, and does not require ceilometer.
   This template calls multiple nested templates which actually do the
   majority of the work.  This file calls the following yaml files in a ./nested subdirectory
     setup_net_sg.yaml sets up the security groups and networks for Web, App, and Database
